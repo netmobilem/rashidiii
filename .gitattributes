@@ -1,0 +1,35 @@
+# Normalise line endings so Linux containers, Windows checkouts and CI agree.
+* text=auto eol=lf
+
+# Shell scripts and Python must keep LF endings to run inside the image.
+*.sh            text eol=lf
+*.py            text eol=lf
+Dockerfile      text eol=lf
+*.yml           text eol=lf
+*.yaml          text eol=lf
+*.json          text eol=lf
+*.toml          text eol=lf
+*.ini           text eol=lf
+
+# Markdown: keep LF, but let GitHub render whatever it gets.
+*.md            text eol=lf
+
+# Binary assets — never touch these.
+*.png           binary
+*.jpg           binary
+*.jpeg          binary
+*.gif           binary
+*.webp          binary
+*.ico           binary
+*.woff          binary
+*.woff2         binary
+*.ttf           binary
+*.zip           binary
+*.gz            binary
+*.tar           binary
+*.db            binary
+*.sqlite3       binary
+
+# Diffs that are not worth rendering.
+frontend/package-lock.json  -diff linguist-generated
+node-agent/dist/**          -diff linguist-generated

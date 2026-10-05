@@ -1,0 +1,24 @@
+# Build context hygiene: never ship secrets, state, caches or test artefacts.
+.git
+.gitignore
+**/.env
+**/.env.*
+!**/.env.example
+.venv
+**/__pycache__
+**/*.pyc
+**/.pytest_cache
+**/node_modules
+**/dist
+**/.vite
+**/.mypy_cache
+**/.ruff_cache
+titan.db
+.data
+data
+tls
+*.log
+docs
+tests
+uploads
+node-agent/dist

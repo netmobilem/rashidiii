@@ -1,0 +1,137 @@
+# TiTaN — local / single-host production stack.
+#
+#   docker compose up -d --build          panel + postgres + redis + panel-nginx
+#   docker compose --profile node up -d   also run a local node container
+#   docker compose logs -f titan-panel
+#
+# Everything persistent lives in named volumes, so upgrades never lose data.
+
+name: titan
+
+x-common-env: &common-env
+  TZ: ${TZ:-UTC}
+  ENV: ${ENV:-production}
+
+services:
+  titan-panel:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: titan-panel:latest
+    restart: unless-stopped
+    environment:
+      <<: *common-env
+      PORT: "8080"
+      HOST: 0.0.0.0
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-titan}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@titan-db:5432/${POSTGRES_DB:-titan}
+      REDIS_URL: redis://titan-cache:6379/0
+      PUBLIC_URL: ${PUBLIC_URL:-http://localhost:8080}
+      APP_SECRET: ${APP_SECRET:-}
+      SESSION_SECRET: ${SESSION_SECRET:-}
+      API_KEY_PEPPER: ${API_KEY_PEPPER:-}
+      NODE_API_SECRET: ${NODE_API_SECRET:-}
+      BOOTSTRAP_ADMIN_USERNAME: ${BOOTSTRAP_ADMIN_USERNAME:-admin}
+      BOOTSTRAP_ADMIN_PASSWORD: ${BOOTSTRAP_ADMIN_PASSWORD:-}
+      GEOIP_PROVIDER: ${GEOIP_PROVIDER:-ipwho.is}
+      TITAN_STATE_DIR: /data/state
+      DATA_DIR: /data
+    volumes:
+      - titan-data:/data
+    expose:
+      - "8080"
+    ports:
+      - "${PANEL_PORT:-8080}:8080"
+    depends_on:
+      titan-db:
+        condition: service_healthy
+      titan-cache:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/titan-healthcheck"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 25s
+    networks: [titan]
+
+  titan-db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-titan}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-titan}
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - titan-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-titan} -d ${POSTGRES_DB:-titan}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks: [titan]
+
+  titan-cache:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--save", "60", "1", "--appendonly", "no", "--maxmemory", "256mb", "--maxmemory-policy", "allkeys-lru"]
+    volumes:
+      - titan-cache:/data
+    networks: [titan]
+
+  titan-edge:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    depends_on:
+      titan-panel:
+        condition: service_started
+    volumes:
+      - ./nginx/panel.conf:/etc/nginx/nginx.conf:ro
+      - ./tls:/etc/titan/tls:ro
+      - titan-acme:/var/www/acme
+      - titan-nginx-logs:/var/log/nginx
+    ports:
+      - "${HTTP_PORT:-80}:80"
+      - "${HTTPS_PORT:-443}:443"
+    healthcheck:
+      test: ["CMD", "nginx", "-t"]
+      interval: 60s
+      timeout: 5s
+      retries: 3
+    networks: [titan]
+
+  # Optional: run a node on the same host (also useful as a staging node).
+  titan-node:
+    profiles: ["node"]
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.node
+    image: titan-node:latest
+    restart: unless-stopped
+    environment:
+      <<: *common-env
+      TITAN_PANEL_URL: ${PUBLIC_URL:-http://titan-panel:8080}
+      TITAN_NODE_TOKEN: ${NODE_TOKEN:?create a node in the panel and copy its token}
+      TITAN_NODE_NAME: ${NODE_NAME:-local-node}
+      TITAN_AGENT_PORT: "62050"
+      TITAN_PANEL_VERIFY_TLS: "0"
+    volumes:
+      - titan-node-data:/var/lib/titan
+      - titan-node-logs:/var/log/titan
+    ports:
+      - "443:443"
+      - "62050:62050"
+    networks: [titan]
+
+volumes:
+  titan-data:
+  titan-db:
+  titan-cache:
+  titan-acme:
+  titan-nginx-logs:
+  titan-node-data:
+  titan-node-logs:
+
+networks:
+  titan:
+    driver: bridge
